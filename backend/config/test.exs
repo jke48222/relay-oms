@@ -36,3 +36,6 @@ config :phoenix, :plug_init_mode, :runtime
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Tests drive the workflow directly; the async pipeline stays off.
+config :relay, Relay.Fulfillment.Pipeline, enabled: false

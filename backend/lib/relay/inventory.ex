@@ -47,6 +47,107 @@ defmodule Relay.Inventory do
     )
   end
 
+  ## Allocation — call these ONLY inside a transaction.
+  #
+  # All rows for the order's products are locked with FOR UPDATE before any
+  # counts are read, so two orders racing for the last units serialize at the
+  # database: the first wins, the second sees the decremented stock and gets
+  # {:error, :insufficient_stock}. The DB check constraint
+  # (allocated <= on_hand) is the final backstop.
+
+  alias Relay.Fulfillment.Zones
+
+  @doc """
+  Reserve stock for `line_items` at a single facility that can cover all of
+  them, preferring the facility in the destination's shipping zone, then the
+  one with the deepest availability. Returns `{:ok, facility_id}` or
+  `{:error, :insufficient_stock}`.
+  """
+  def allocate_within_txn(line_items, destination_region) do
+    needs = aggregate_needs(line_items)
+    rows = lock_rows(Map.keys(needs))
+    facilities_by_id = Map.new(list_facilities(), &{&1.id, &1})
+    dest_zone = Zones.zone_for(destination_region)
+
+    candidate =
+      rows
+      |> Enum.group_by(& &1.facility_id)
+      |> Enum.filter(fn {_fid, frows} -> covers?(frows, needs) end)
+      |> Enum.sort_by(fn {fid, frows} ->
+        facility = facilities_by_id[fid]
+        zone_match = if Zones.zone_for(facility.region) == dest_zone, do: 0, else: 1
+        {zone_match, -total_available(frows)}
+      end)
+      |> List.first()
+
+    case candidate do
+      nil ->
+        {:error, :insufficient_stock}
+
+      {facility_id, frows} ->
+        adjust_rows(frows, needs, allocated: 1)
+        {:ok, facility_id}
+    end
+  end
+
+  @doc "Return an order's reserved units to the pool (cancellation)."
+  def release_within_txn(line_items, facility_id) do
+    needs = aggregate_needs(line_items)
+    rows = lock_rows(Map.keys(needs), facility_id)
+    adjust_rows(rows, needs, allocated: -1)
+    :ok
+  end
+
+  @doc "Ship reserved units out the door: on_hand and allocated both drop."
+  def consume_within_txn(line_items, facility_id) do
+    needs = aggregate_needs(line_items)
+    rows = lock_rows(Map.keys(needs), facility_id)
+    adjust_rows(rows, needs, on_hand: -1, allocated: -1)
+    :ok
+  end
+
+  defp aggregate_needs(line_items) do
+    Enum.reduce(line_items, %{}, fn li, acc ->
+      Map.update(acc, li.product_id, li.quantity, &(&1 + li.quantity))
+    end)
+  end
+
+  defp lock_rows(product_ids, facility_id \\ nil) do
+    query =
+      from i in InventoryItem,
+        where: i.product_id in ^product_ids,
+        lock: "FOR UPDATE"
+
+    query = if facility_id, do: where(query, [i], i.facility_id == ^facility_id), else: query
+    Repo.all(query)
+  end
+
+  defp covers?(rows, needs) do
+    by_product = Map.new(rows, &{&1.product_id, &1})
+
+    Enum.all?(needs, fn {product_id, qty} ->
+      case by_product[product_id] do
+        nil -> false
+        item -> InventoryItem.available(item) >= qty
+      end
+    end)
+  end
+
+  defp total_available(rows), do: rows |> Enum.map(&InventoryItem.available/1) |> Enum.sum()
+
+  defp adjust_rows(rows, needs, signs) do
+    by_product = Map.new(rows, &{&1.product_id, &1})
+
+    Enum.each(needs, fn {product_id, qty} ->
+      row = Map.fetch!(by_product, product_id)
+
+      inc =
+        for {field, sign} <- signs, do: {field, sign * qty}
+
+      {1, _} = Repo.update_all(from(i in InventoryItem, where: i.id == ^row.id), inc: inc)
+    end)
+  end
+
   @doc """
   Per-facility rollup for the dashboard: total units on hand, allocated,
   and available.

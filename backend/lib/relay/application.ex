@@ -12,11 +12,19 @@ defmodule Relay.Application do
       Relay.Repo,
       {DNSCluster, query: Application.get_env(:relay, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Relay.PubSub},
-      # Start a worker by calling: Relay.Worker.start_link(arg)
-      # {Relay.Worker, arg},
       # Start to serve requests, typically the last entry
       RelayWeb.Endpoint
     ]
+
+    # The fulfillment pipeline consumes order events and advances orders
+    # through the lifecycle. Disabled in test — tests drive the workflow
+    # directly for deterministic assertions.
+    children =
+      if Application.get_env(:relay, Relay.Fulfillment.Pipeline)[:enabled] do
+        children ++ [Relay.Fulfillment.Pipeline]
+      else
+        children
+      end
 
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options
