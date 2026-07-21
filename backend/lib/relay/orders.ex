@@ -74,6 +74,19 @@ defmodule Relay.Orders do
     %{orders: orders, page: page, page_size: page_size, total: total}
   end
 
+  @doc """
+  Orders the pipeline is responsible for advancing. `exception` is excluded on
+  purpose — it parks until a human retries or cancels — as are the terminal
+  states.
+  """
+  def list_in_flight do
+    Repo.all(
+      from o in Order,
+        where: o.status in ["received", "allocated", "picking", "packed", "shipped"],
+        order_by: [asc: o.placed_at]
+    )
+  end
+
   @doc "Counts by status — feeds the dashboard funnel."
   def status_counts do
     counts =

@@ -7,7 +7,9 @@ config :relay, RelayWeb.Endpoint,
   force_ssl: [
     rewrite_on: [:x_forwarded_proto],
     exclude: [
-      # paths: ["/health"],
+      # Kubernetes probes hit the pod IP over plain HTTP; a 301 here would
+      # fail readiness. TLS terminates at the ingress.
+      paths: ["/api/v1/health"],
       hosts: ["localhost", "127.0.0.1"]
     ]
   ]

@@ -1,12 +1,15 @@
 defmodule Relay.Metrics do
   @moduledoc """
-  Operational rollups for the dashboard. Every figure is computed straight
-  from Postgres — the event log and the orders table are the source of
-  truth, so the numbers can't drift from reality.
+  Operational rollups for the dashboard, computed straight from Postgres.
+
+  Rate metrics (fill rate) read the immutable event log rather than current
+  order status — a cancelled order can't retroactively change how allocation
+  went, so the rates don't drift as statuses move on.
   """
 
   import Ecto.Query, warn: false
 
+  alias Relay.Events.OrderEvent
   alias Relay.Fulfillment.Shipment
   alias Relay.Orders
   alias Relay.Orders.Order
@@ -33,7 +36,7 @@ defmodule Relay.Metrics do
   defp gmv_since(cutoff) do
     Repo.one(
       from o in Order,
-        where: o.placed_at >= ^cutoff and o.status != "cancelled",
+        where: o.placed_at >= ^cutoff and o.status not in ["cancelled", "exception"],
         select: coalesce(sum(o.total_cents), 0)
     )
   end
@@ -49,15 +52,17 @@ defmodule Relay.Metrics do
     Repo.aggregate(from(o in Order, where: o.status == ^status), :count)
   end
 
-  # Of the orders allocation has ruled on, how many got stock? Exceptions are
-  # the misses; anything holding a facility is a hit.
+  # Share of allocation ATTEMPTS that found stock, read from the event log.
+  # Statuses move on (exceptions get retried or cancelled); the events that
+  # recorded each attempt never do.
   defp fill_rate do
     %{hits: hits, misses: misses} =
       Repo.one(
-        from o in Order,
+        from e in OrderEvent,
+          where: e.type in ["order.allocated", "order.allocation_failed"],
           select: %{
-            hits: count(o.id) |> filter(not is_nil(o.facility_id)),
-            misses: count(o.id) |> filter(o.status == "exception")
+            hits: count(e.id) |> filter(e.type == "order.allocated"),
+            misses: count(e.id) |> filter(e.type == "order.allocation_failed")
           }
       )
 

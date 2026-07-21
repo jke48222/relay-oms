@@ -15,9 +15,19 @@ defmodule Relay.Fulfillment.Pipeline do
   happens asynchronously. Timers carry a little jitter so a burst of
   simulated orders doesn't march in lockstep.
 
+  ## Crash safety
+
+  Timers are process-local, so a restart would strand every in-flight order
+  (and permanently hold its reserved stock). To recover, `init/1` rehydrates:
+  it scans the database for non-terminal orders and reschedules each one's
+  next step — the same reason a Kafka consumer tracks offsets and resumes
+  from the log on boot. Rehydration is safe to race with live events because
+  every transition validates against the state machine under a row lock; a
+  duplicate advance simply loses with `{:invalid_transition, ...}`.
+
   A step that finds the order already moved (say, cancelled while the
-  picking timer was in flight) fails with `{:invalid_transition, ...}` and
-  is simply dropped — the state machine, not the timer, is the authority.
+  picking timer was in flight) is likewise dropped — the state machine, not
+  the timer, is the authority.
   """
 
   use GenServer
@@ -26,6 +36,7 @@ defmodule Relay.Fulfillment.Pipeline do
 
   alias Relay.Events
   alias Relay.Events.OrderEvent
+  alias Relay.Orders
   alias Relay.Orders.Workflow
 
   @next_step %{
@@ -36,6 +47,15 @@ defmodule Relay.Fulfillment.Pipeline do
     "order.shipped" => :mark_delivered
   }
 
+  # On boot there is no event to react to — only the order's current status.
+  @step_for_status %{
+    "received" => :allocate,
+    "allocated" => :start_picking,
+    "picking" => :mark_packed,
+    "packed" => :ship,
+    "shipped" => :mark_delivered
+  }
+
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -43,17 +63,32 @@ defmodule Relay.Fulfillment.Pipeline do
   @impl true
   def init(_opts) do
     Events.subscribe()
-    {:ok, %{}}
+    {:ok, %{}, {:continue, :rehydrate}}
+  end
+
+  @impl true
+  def handle_continue(:rehydrate, state) do
+    in_flight = Orders.list_in_flight()
+
+    Enum.each(in_flight, fn order ->
+      case @step_for_status[order.status] do
+        nil -> :ok
+        step -> schedule(step, order.id)
+      end
+    end)
+
+    if in_flight != [] do
+      Logger.info("pipeline: rehydrated #{length(in_flight)} in-flight order(s)")
+    end
+
+    {:noreply, state}
   end
 
   @impl true
   def handle_info({:order_event, %OrderEvent{} = event}, state) do
     case @next_step[event.type] do
-      nil ->
-        :ok
-
-      step ->
-        Process.send_after(self(), {:advance, step, event.order_id}, delay_for(step))
+      nil -> :ok
+      step -> schedule(step, event.order_id)
     end
 
     {:noreply, state}
@@ -81,6 +116,17 @@ defmodule Relay.Fulfillment.Pipeline do
     end
 
     {:noreply, state}
+  end
+
+  # A supervised worker must shrug off messages it didn't ask for — crashing
+  # here would discard every pending timer.
+  def handle_info(message, state) do
+    Logger.debug("pipeline: ignoring unexpected message #{inspect(message)}")
+    {:noreply, state}
+  end
+
+  defp schedule(step, order_id) do
+    Process.send_after(self(), {:advance, step, order_id}, delay_for(step))
   end
 
   defp delay_for(step) do

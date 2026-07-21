@@ -1,5 +1,7 @@
 defmodule Relay.Orders.WorkflowTest do
-  use Relay.DataCase, async: true
+  # async: false — several tests subscribe to the shared PubSub topic and
+  # assert_receive; parallel test processes would hear each other's events.
+  use Relay.DataCase, async: false
 
   import Relay.Fixtures
 
@@ -24,7 +26,13 @@ defmodule Relay.Orders.WorkflowTest do
       order
     else
       {:ok, order} = Workflow.mark_packed(order_id)
-      if target == "packed", do: order, else: elem(Workflow.ship_order(order_id), 1)
+
+      if target == "packed" do
+        order
+      else
+        {:ok, shipped} = Workflow.ship_order(order_id)
+        shipped
+      end
     end
   end
 

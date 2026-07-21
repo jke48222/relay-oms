@@ -37,48 +37,61 @@ defmodule Relay.Orders.Workflow do
     end
   end
 
+  # Random order numbers can collide (rarely); regenerating is cheaper and
+  # kinder than surfacing "number has already been taken" to a customer.
+  @number_attempts 3
+
   defp insert_order(attrs) do
     with {:ok, line_changesets, total_cents} <- build_line_items(attrs[:line_items]) do
-      changeset =
-        %Order{}
-        |> Order.changeset(%{
-          number: generate_number(),
-          status: "received",
-          channel: attrs[:channel],
-          customer_name: attrs[:customer_name],
-          destination_city: attrs[:destination_city],
-          destination_region: attrs[:destination_region],
-          idempotency_key: attrs[:idempotency_key],
-          total_cents: total_cents,
-          placed_at: DateTime.utc_now()
-        })
-        |> Ecto.Changeset.put_assoc(:line_items, line_changesets)
+      attempt_insert(attrs, line_changesets, total_cents, @number_attempts)
+    end
+  end
 
-      Multi.new()
-      |> Multi.insert(:order, changeset)
-      |> Multi.insert(:event, fn %{order: order} ->
-        Events.build(order.id, "order.received", %{
-          "number" => order.number,
-          "channel" => order.channel,
-          "total_cents" => order.total_cents,
-          "destination" => "#{order.destination_city}, #{order.destination_region}"
-        })
-      end)
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{order: order, event: event}} ->
-          Events.broadcast(event)
-          {:ok, preload(order), :created}
+  defp attempt_insert(attrs, line_changesets, total_cents, attempts_left) do
+    changeset =
+      %Order{}
+      |> Order.changeset(%{
+        number: generate_number(),
+        status: "received",
+        channel: attrs[:channel],
+        customer_name: attrs[:customer_name],
+        destination_city: attrs[:destination_city],
+        destination_region: attrs[:destination_region],
+        idempotency_key: attrs[:idempotency_key],
+        total_cents: total_cents,
+        placed_at: DateTime.utc_now()
+      })
+      |> Ecto.Changeset.put_assoc(:line_items, line_changesets)
 
-        {:error, :order, %Ecto.Changeset{errors: errors} = changeset, _} ->
+    Multi.new()
+    |> Multi.insert(:order, changeset)
+    |> Multi.insert(:event, fn %{order: order} ->
+      Events.build(order.id, "order.received", %{
+        "number" => order.number,
+        "channel" => order.channel,
+        "total_cents" => order.total_cents,
+        "destination" => "#{order.destination_city}, #{order.destination_region}"
+      })
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{order: order, event: event}} ->
+        Events.broadcast(event)
+        {:ok, preload(order), :created}
+
+      {:error, :order, %Ecto.Changeset{errors: errors} = changeset, _} ->
+        cond do
           # Lost a race on the idempotency key: someone committed the same
           # request between our lookup and insert. Replay theirs.
-          if Keyword.has_key?(errors, :idempotency_key) do
+          Keyword.has_key?(errors, :idempotency_key) ->
             {:ok, preload(existing_by_key(attrs[:idempotency_key])), :replayed}
-          else
+
+          Keyword.has_key?(errors, :number) and attempts_left > 1 ->
+            attempt_insert(attrs, line_changesets, total_cents, attempts_left - 1)
+
+          true ->
             {:error, changeset}
-          end
-      end
+        end
     end
   end
 
@@ -258,29 +271,40 @@ defmodule Relay.Orders.Workflow do
 
     result =
       Enum.reduce_while(specs, {[], 0}, fn spec, {changesets, total} ->
-        spec = normalize_line(spec)
+        case normalize_line(spec) do
+          {:error, reason} ->
+            {:halt, {:error, reason}}
 
-        case products[spec[:product_id]] do
-          nil ->
-            {:halt, {:error, {:unknown_product, spec[:product_id]}}}
-
-          product ->
-            quantity = spec[:quantity] || 0
-
-            changeset =
-              LineItem.changeset(%LineItem{}, %{
-                product_id: product.id,
-                quantity: quantity,
-                unit_price_cents: product.unit_price_cents
-              })
-
-            {:cont, {[changeset | changesets], total + quantity * product.unit_price_cents}}
+          spec ->
+            build_line_item(products, spec, changesets, total)
         end
       end)
 
     case result do
       {:error, reason} -> {:error, reason}
       {changesets, total} -> {:ok, Enum.reverse(changesets), total}
+    end
+  end
+
+  # A JSON object or scalar where a list belongs is a client error, not a crash.
+  defp build_line_items(_), do: {:error, :no_line_items}
+
+  defp build_line_item(products, spec, changesets, total) do
+    case products[spec[:product_id]] do
+      nil ->
+        {:halt, {:error, {:unknown_product, spec[:product_id]}}}
+
+      product ->
+        quantity = spec[:quantity] || 0
+
+        changeset =
+          LineItem.changeset(%LineItem{}, %{
+            product_id: product.id,
+            quantity: quantity,
+            unit_price_cents: product.unit_price_cents
+          })
+
+        {:cont, {[changeset | changesets], total + quantity * product.unit_price_cents}}
     end
   end
 
@@ -312,7 +336,9 @@ defmodule Relay.Orders.Workflow do
 
   defp normalize(map), do: take_keys(map, @order_keys)
 
-  defp normalize_line(map), do: take_keys(map, @line_keys)
+  defp normalize_line(map) when is_map(map), do: take_keys(map, @line_keys)
+  # A scalar where a line-item object belongs (e.g. `"line_items": [1, 2]`).
+  defp normalize_line(_), do: {:error, :invalid_line_items}
 
   defp take_keys(map, keys) when is_map(map) do
     Map.new(keys, fn key -> {key, Map.get(map, key) || Map.get(map, Atom.to_string(key))} end)

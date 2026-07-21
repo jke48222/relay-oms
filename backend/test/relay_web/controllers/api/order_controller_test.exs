@@ -49,6 +49,20 @@ defmodule RelayWeb.API.OrderControllerTest do
       assert %{"error" => %{"code" => "no_line_items"}} = json_response(conn, 422)
     end
 
+    test "422s a JSON object where the line_items list belongs", %{conn: conn} do
+      conn =
+        post(conn, ~p"/api/v1/orders", %{"channel" => "shopify", "line_items" => %{"oops" => 1}})
+
+      assert %{"error" => %{"code" => "no_line_items"}} = json_response(conn, 422)
+    end
+
+    test "422s scalar line items instead of crashing", %{conn: conn} do
+      conn =
+        post(conn, ~p"/api/v1/orders", %{"channel" => "shopify", "line_items" => [1, 2]})
+
+      assert %{"error" => %{"code" => "invalid_line_items"}} = json_response(conn, 422)
+    end
+
     test "422s an unknown product", %{conn: conn} do
       conn =
         post(conn, ~p"/api/v1/orders", %{

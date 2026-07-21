@@ -7,24 +7,30 @@ defmodule Relay.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      RelayWeb.Telemetry,
-      Relay.Repo,
-      {DNSCluster, query: Application.get_env(:relay, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: Relay.PubSub},
-      # Start to serve requests, typically the last entry
-      RelayWeb.Endpoint
-    ]
-
     # The fulfillment pipeline consumes order events and advances orders
-    # through the lifecycle. Disabled in test — tests drive the workflow
-    # directly for deterministic assertions.
-    children =
+    # through the lifecycle. It must be running BEFORE the endpoint accepts
+    # requests, or orders created in the boot window broadcast to nobody.
+    # Disabled in test — tests drive the workflow directly (or start their
+    # own supervised pipeline) for deterministic assertions.
+    pipeline =
       if Application.get_env(:relay, Relay.Fulfillment.Pipeline)[:enabled] do
-        children ++ [Relay.Fulfillment.Pipeline]
+        [Relay.Fulfillment.Pipeline]
       else
-        children
+        []
       end
+
+    children =
+      [
+        RelayWeb.Telemetry,
+        Relay.Repo,
+        {DNSCluster, query: Application.get_env(:relay, :dns_cluster_query) || :ignore},
+        {Phoenix.PubSub, name: Relay.PubSub}
+      ] ++
+        pipeline ++
+        [
+          # Start to serve requests, typically the last entry
+          RelayWeb.Endpoint
+        ]
 
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options

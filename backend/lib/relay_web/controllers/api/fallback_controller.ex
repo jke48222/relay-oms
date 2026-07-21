@@ -38,6 +38,17 @@ defmodule RelayWeb.API.FallbackController do
     |> json(%{error: %{code: "no_line_items", message: "order needs at least one line item"}})
   end
 
+  def call(conn, {:error, :invalid_line_items}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{
+      error: %{
+        code: "invalid_line_items",
+        message: "line_items must be a list of {product_id, quantity} objects"
+      }
+    })
+  end
+
   def call(conn, {:error, {:unknown_product, id}}) do
     conn
     |> put_status(:unprocessable_entity)
