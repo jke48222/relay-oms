@@ -1,0 +1,35 @@
+# One hostname, split by path — the SPA and the API share an origin, so the
+# browser needs no CORS and the WebSocket upgrade flows through the same
+# front door. On GKE this would be a GCE ingress or Gateway API resource.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: relay
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600" # long-lived websockets
+spec:
+  rules:
+    - host: relay.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: relay-backend
+                port:
+                  number: 4000
+          - path: /socket
+            pathType: Prefix
+            backend:
+              service:
+                name: relay-backend
+                port:
+                  number: 4000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: relay-frontend
+                port:
+                  number: 80

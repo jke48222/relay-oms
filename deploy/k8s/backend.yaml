@@ -1,0 +1,81 @@
+# Relay backend on Kubernetes — written for GKE (Stord's home), runnable on
+# any cluster. Postgres itself is intentionally NOT a Deployment here: in
+# production it would be Cloud SQL, reached via the connection string in the
+# `relay-secrets` Secret.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relay-backend
+  labels:
+    app: relay-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: relay-backend
+  template:
+    metadata:
+      labels:
+        app: relay-backend
+    spec:
+      containers:
+        - name: backend
+          image: relay-backend:0.1.0 # in CI this would be gcr.io/<project>/relay-backend:<sha>
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - secretRef:
+                name: relay-secrets # DATABASE_URL, SECRET_KEY_BASE
+          env:
+            - name: PHX_HOST
+              value: relay.example.com
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          # The /health endpoint pings Postgres, so readiness gates on a
+          # working database connection, not just a booted BEAM.
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 4000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: relay-backend
+spec:
+  selector:
+    app: relay-backend
+  ports:
+    - port: 4000
+      targetPort: 4000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: relay-backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: relay-backend
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

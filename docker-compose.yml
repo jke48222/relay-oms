@@ -1,0 +1,39 @@
+# Full stack in containers: postgres + Phoenix release + nginx-served SPA.
+# (Written as a deploy prop and for machines with Docker; local development
+# on this repo runs `mix phx.server` + `npm run dev` directly.)
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: relay
+      POSTGRES_PASSWORD: relay_dev_password
+      POSTGRES_DB: relay_prod
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relay"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: ecto://relay:relay_dev_password@db/relay_prod
+      SECRET_KEY_BASE: "generate-one-with: mix phx.gen.secret"
+      PHX_HOST: localhost
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
