@@ -21,12 +21,6 @@ config :relay, RelayWeb.Endpoint,
   secret_key_base: "PHJ4kp3ng88yFTbVqV7/o867R+vehFW/cRmglLKpK9MRKby8CUKN80/69CdZJRWL",
   server: false
 
-# In test we don't send emails
-config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Test
-
-# Disable swoosh api client as it is only required for production adapters
-config :swoosh, :api_client, false
-
 # Print only warnings and errors during test
 config :logger, level: :warning
 

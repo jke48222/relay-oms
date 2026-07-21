@@ -22,15 +22,6 @@ config :relay, RelayWeb.Endpoint,
   pubsub_server: Relay.PubSub,
   live_view: [signing_salt: "PeTZGo1s"]
 
-# Configure the mailer
-#
-# By default it uses the "Local" adapter which stores the emails
-# locally. You can see the emails in your browser, at "/dev/mailbox".
-#
-# For production it's recommended to configure a different adapter
-# at the `config/runtime.exs`.
-config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Local
-
 # Configure Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",

@@ -1,7 +1,7 @@
 # Build stage — compile a self-contained BEAM release. The final image has
 # no Elixir/Mix toolchain, just the runtime: this is the same shape Stord
 # ships to GKE.
-FROM hexpm/elixir:1.20.2-erlang-29.0-alpine-3.22.2 AS build
+FROM hexpm/elixir:1.20.2-erlang-29.0.3-alpine-3.22.5 AS build
 
 RUN apk add --no-cache build-base git
 
@@ -20,8 +20,9 @@ COPY lib lib
 
 RUN mix compile && mix release
 
-# Runtime stage — minimal Alpine with just the release.
-FROM alpine:3.22.2 AS app
+# Runtime stage — minimal Alpine with just the release. Version matches the
+# build stage's Alpine so shared libraries line up.
+FROM alpine:3.22.5 AS app
 
 RUN apk add --no-cache libstdc++ openssl ncurses-libs
 

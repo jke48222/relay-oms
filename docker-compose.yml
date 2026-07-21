@@ -18,9 +18,14 @@ services:
 
   backend:
     build: ./backend
+    # Run migrations, then start — the release ships Relay.Release for exactly
+    # this (there is no Mix inside the container).
+    command: sh -c 'bin/relay eval "Relay.Release.migrate()" && bin/relay start'
     environment:
       DATABASE_URL: ecto://relay:relay_dev_password@db/relay_prod
-      SECRET_KEY_BASE: "generate-one-with: mix phx.gen.secret"
+      # Generate with `mix phx.gen.secret` and export before `docker compose up`:
+      #   export SECRET_KEY_BASE=$(cd backend && mix phx.gen.secret)
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?run "mix phx.gen.secret" and export SECRET_KEY_BASE}
       PHX_HOST: localhost
     depends_on:
       db:

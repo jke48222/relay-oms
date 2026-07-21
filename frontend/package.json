@@ -1,5 +1,5 @@
 {
-  "name": "frontend",
+  "name": "relay-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -31,5 +31,6 @@
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
     "vitest": "^4.1.10"
-  }
+  },
+  "description": "Relay OMS console — React 19 + TypeScript SPA over the Phoenix API, live via Phoenix Channels"
 }

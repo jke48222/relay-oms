@@ -1,0 +1,23 @@
+# Run once per deploy, before (or alongside) rolling the backend Deployment:
+# migrations are a separate short-lived Job, not something every pod races to
+# do at boot. `kubectl apply -f migrate-job.yaml && kubectl wait --for=condition=complete job/relay-migrate`
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: relay-migrate
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: relay-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: relay-backend:0.1.0
+          command: ["bin/relay", "eval", "Relay.Release.migrate()"]
+          envFrom:
+            - secretRef:
+                name: relay-secrets

@@ -50,8 +50,16 @@ At Relay's scale the transport is `Phoenix.PubSub` inside one BEAM node. At
 Stord's scale you'd point a relay process (Debezium, or a poller) at
 `order_events` and produce to Kafka; each consumer becomes a service with a
 consumer group and its own offset. `sequence` (a `bigserial`) already plays
-the role of the partition offset — total order, gapless per producer,
+the role of the partition offset — monotonic and strictly increasing (gaps
+appear when a transaction rolls back, exactly like unused Kafka offsets),
 replayable from any point. **The seam is in the schema, not just the code.**
+
+The consumer half of the analogy is real too: the fulfillment worker
+**rehydrates on boot** — it scans non-terminal orders and reschedules each
+one's next step, the way a consumer group resumes from its committed offset.
+Kill the node mid-flight and restart it; stranded orders pick up where they
+left off, and reserved inventory never leaks. There's a test for exactly
+this in [`pipeline_test.exs`](../backend/test/relay/fulfillment/pipeline_test.exs).
 
 Orders are also event-sourced in the practical sense: the detail page's
 timeline is a `SELECT * FROM order_events WHERE order_id = ... ORDER BY
@@ -97,10 +105,10 @@ pipeline) or cancelled.
 
 | Real and load-bearing | Prop, labeled as such |
 |---|---|
-| Phoenix API, Ecto/Postgres, locks, constraints | `deploy/k8s/*` — correct manifests, not applied locally |
-| Outbox + async consumer + Channels | `docker-compose.yml` / Dockerfiles — written for Docker-equipped machines |
-| Failure-mode test suite | Timers standing in for WMS pick/pack/carrier signals |
-| CI (runs on every push) | `Simulate` standing in for channel webhooks (Shopify/Amazon) |
+| Phoenix API, Ecto/Postgres, locks, constraints | `deploy/k8s/*` — correct manifests (incl. migration Job + secrets template), not applied locally |
+| Outbox + async consumer (with boot rehydration) + Channels | `docker-compose.yml` / Dockerfiles — release runs `Relay.Release.migrate()` before boot; written for Docker-equipped machines |
+| Failure-mode test suite; CI on every push | Timers standing in for WMS pick/pack/carrier signals |
+| Working demo loop: stockout → restock → retry | `Simulate` standing in for channel webhooks (Shopify/Amazon) |
 
 ## What changes at Stord scale
 

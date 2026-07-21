@@ -1,6 +1,8 @@
 # One hostname, split by path — the SPA and the API share an origin, so the
 # browser needs no CORS and the WebSocket upgrade flows through the same
-# front door. On GKE this would be a GCE ingress or Gateway API resource.
+# front door. Assumes an nginx ingress controller (hence the annotation);
+# on GKE you'd express the same shape as a Gateway API resource with a
+# BackendConfig for the websocket timeout.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
