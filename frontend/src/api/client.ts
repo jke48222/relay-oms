@@ -26,9 +26,12 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // init spreads FIRST: merged headers must win, or a caller passing extra
+  // headers (e.g. idempotency-key) would silently drop content-type and the
+  // server would parse an empty body.
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'content-type': 'application/json', ...init?.headers },
     ...init,
+    headers: { 'content-type': 'application/json', ...init?.headers },
   })
 
   const body = res.status === 204 ? null : await res.json()

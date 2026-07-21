@@ -50,5 +50,8 @@ describe('api client', () => {
     const init = fetchMock.mock.calls[0][1] as RequestInit
     const headers = init.headers as Record<string, string>
     expect(headers['idempotency-key']).toBe('key-123')
+    // Regression: extra headers must MERGE with content-type, not replace it —
+    // losing it makes the server parse an empty body (422 no_line_items).
+    expect(headers['content-type']).toBe('application/json')
   })
 })
