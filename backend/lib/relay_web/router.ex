@@ -5,8 +5,22 @@ defmodule RelayWeb.Router do
     plug :accepts, ["json"]
   end
 
-  scope "/api", RelayWeb do
+  scope "/api/v1", RelayWeb.API do
     pipe_through :api
+
+    get "/health", OpsController, :health
+    get "/metrics", OpsController, :metrics
+    get "/events", OpsController, :events
+    post "/simulate", OpsController, :simulate
+
+    get "/products", CatalogController, :products
+    get "/facilities", CatalogController, :facilities
+    get "/inventory", CatalogController, :inventory
+
+    get "/orders", OrderController, :index
+    post "/orders", OrderController, :create
+    get "/orders/:id", OrderController, :show
+    post "/orders/:id/cancel", OrderController, :cancel
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development

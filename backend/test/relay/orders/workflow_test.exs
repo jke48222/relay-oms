@@ -19,6 +19,7 @@ defmodule Relay.Orders.WorkflowTest do
 
   defp continue_run(order_id, target) do
     {:ok, order} = Workflow.start_picking(order_id)
+
     if target == "picking" do
       order
     else

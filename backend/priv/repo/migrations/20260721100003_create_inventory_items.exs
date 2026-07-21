@@ -4,6 +4,7 @@ defmodule Relay.Repo.Migrations.CreateInventoryItems do
   def change do
     create table(:inventory_items, primary_key: false) do
       add :id, :binary_id, primary_key: true
+
       add :facility_id, references(:facilities, type: :binary_id, on_delete: :delete_all),
         null: false
 

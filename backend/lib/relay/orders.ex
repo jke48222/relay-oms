@@ -20,6 +20,23 @@ defmodule Relay.Orders do
     |> Repo.preload([:facility, :shipment, :events, line_items: [:product]])
   end
 
+  @doc "Controller-safe fetch: bad UUIDs and misses both come back as errors."
+  def fetch_order(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} ->
+        case Repo.get(Order, uuid) do
+          nil ->
+            {:error, :not_found}
+
+          order ->
+            {:ok, Repo.preload(order, [:facility, :shipment, :events, line_items: [:product]])}
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
   def get_order_by_idempotency_key(key) when is_binary(key) do
     Repo.get_by(Order, idempotency_key: key)
   end
@@ -32,7 +49,12 @@ defmodule Relay.Orders do
   """
   def list_orders(opts \\ %{}) do
     page = to_positive_int(opts[:page] || opts["page"], 1)
-    page_size = min(to_positive_int(opts[:page_size] || opts["page_size"], @default_page_size), @max_page_size)
+
+    page_size =
+      min(
+        to_positive_int(opts[:page_size] || opts["page_size"], @default_page_size),
+        @max_page_size
+      )
 
     base =
       Order
@@ -46,7 +68,7 @@ defmodule Relay.Orders do
       |> order_by([o], desc: o.placed_at)
       |> limit(^page_size)
       |> offset(^((page - 1) * page_size))
-      |> preload([:facility, line_items: [:product]])
+      |> preload([:facility, :shipment, line_items: [:product]])
       |> Repo.all()
 
     %{orders: orders, page: page, page_size: page_size, total: total}
