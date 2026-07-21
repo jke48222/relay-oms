@@ -44,6 +44,13 @@ defmodule RelayWeb.API.OrderController do
     end
   end
 
+  def retry(conn, %{"id" => id}) do
+    with {:ok, order} <- Orders.fetch_order(id),
+         {:ok, retried} <- Workflow.retry_allocation(order.id) do
+      json(conn, %{data: Serialize.order(retried)})
+    end
+  end
+
   defp idempotency_header(conn) do
     case get_req_header(conn, "idempotency-key") do
       [key | _] when byte_size(key) > 0 -> key

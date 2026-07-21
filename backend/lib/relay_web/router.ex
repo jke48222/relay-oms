@@ -16,11 +16,13 @@ defmodule RelayWeb.Router do
     get "/products", CatalogController, :products
     get "/facilities", CatalogController, :facilities
     get "/inventory", CatalogController, :inventory
+    post "/inventory/receive", CatalogController, :receive_stock
 
     get "/orders", OrderController, :index
     post "/orders", OrderController, :create
     get "/orders/:id", OrderController, :show
     post "/orders/:id/cancel", OrderController, :cancel
+    post "/orders/:id/retry", OrderController, :retry
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development

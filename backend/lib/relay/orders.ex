@@ -44,7 +44,8 @@ defmodule Relay.Orders do
   @doc """
   Paginated, filterable listing.
 
-  Options: `:status`, `:channel`, `:page` (1-based), `:page_size`.
+  Options: `:status`, `:channel`, `:number` (substring match, drives the
+  topbar search), `:page` (1-based), `:page_size`.
   Returns `%{orders: [...], page: n, page_size: n, total: n}`.
   """
   def list_orders(opts \\ %{}) do
@@ -60,6 +61,7 @@ defmodule Relay.Orders do
       Order
       |> filter_by(:status, opts[:status] || opts["status"])
       |> filter_by(:channel, opts[:channel] || opts["channel"])
+      |> filter_number(opts[:number] || opts["number"])
 
     total = Repo.aggregate(base, :count)
 
@@ -99,6 +101,13 @@ defmodule Relay.Orders do
   defp filter_by(query, _field, nil), do: query
   defp filter_by(query, _field, ""), do: query
   defp filter_by(query, field, value), do: where(query, [o], field(o, ^field) == ^value)
+
+  defp filter_number(query, term) when is_binary(term) and term != "" do
+    escaped = String.replace(term, ~r/[\\%_]/, fn ch -> "\\" <> ch end)
+    where(query, [o], ilike(o.number, ^"%#{escaped}%"))
+  end
+
+  defp filter_number(query, _), do: query
 
   defp to_positive_int(nil, default), do: default
 

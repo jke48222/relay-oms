@@ -205,6 +205,32 @@ defmodule Relay.Orders.Workflow do
     end)
   end
 
+  @doc """
+  Send an `exception` order back through allocation — the move you make after
+  restocking. Emits `order.received` with a retry marker, so the pipeline
+  reacts exactly as it would to a fresh order; the state machine guard means
+  only parked exceptions can take this path.
+  """
+  def retry_allocation(order_id) do
+    transact_on_order(order_id, fn order ->
+      unless StateMachine.can_transition?(order.status, "received") do
+        Repo.rollback({:invalid_transition, order.status, "received"})
+      end
+
+      order = order |> Ecto.Changeset.change(status: "received") |> Repo.update!()
+
+      event =
+        Repo.insert!(
+          Events.build(order.id, "order.received", %{
+            "number" => order.number,
+            "retry" => true
+          })
+        )
+
+      {order, event}
+    end)
+  end
+
   ## Cancellation
 
   @doc """

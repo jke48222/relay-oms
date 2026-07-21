@@ -49,6 +49,12 @@ defmodule RelayWeb.API.FallbackController do
     })
   end
 
+  def call(conn, {:error, :invalid_quantity}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{error: %{code: "invalid_quantity", message: "quantity must be a positive integer"}})
+  end
+
   def call(conn, {:error, {:unknown_product, id}}) do
     conn
     |> put_status(:unprocessable_entity)

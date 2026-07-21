@@ -149,6 +149,36 @@ defmodule Relay.Inventory do
   end
 
   @doc """
+  Receive inbound stock: `quantity` new units of a product arrive at a
+  facility. The one way `on_hand` ever increases.
+  """
+  def receive_stock(facility_id, product_id, quantity)
+      when is_integer(quantity) and quantity > 0 do
+    with {:ok, facility_uuid} <- Ecto.UUID.cast(facility_id),
+         {:ok, product_uuid} <- Ecto.UUID.cast(product_id) do
+      query =
+        from i in InventoryItem,
+          where: i.facility_id == ^facility_uuid and i.product_id == ^product_uuid
+
+      case Repo.update_all(query, inc: [on_hand: quantity]) do
+        {1, _} ->
+          item =
+            Repo.get_by!(InventoryItem, facility_id: facility_uuid, product_id: product_uuid)
+            |> Repo.preload([:facility, :product])
+
+          {:ok, item}
+
+        {0, _} ->
+          {:error, :not_found}
+      end
+    else
+      :error -> {:error, :not_found}
+    end
+  end
+
+  def receive_stock(_facility_id, _product_id, _quantity), do: {:error, :invalid_quantity}
+
+  @doc """
   Per-facility rollup for the dashboard: total units on hand, allocated,
   and available.
   """

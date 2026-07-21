@@ -163,6 +163,35 @@ defmodule Relay.Orders.WorkflowTest do
     end
   end
 
+  describe "retry_allocation/1" do
+    test "the full recovery loop: stockout → restock → retry → allocated" do
+      product = product_fixture()
+      facility = facility_fixture()
+      stock_fixture(facility, product, 3)
+
+      {:ok, order, :created} = Workflow.create_order(order_attrs(product, 8))
+      {:ok, %{status: "exception"}} = Workflow.allocate_order(order.id)
+
+      # The warehouse receives a pallet…
+      {:ok, item} = Relay.Inventory.receive_stock(facility.id, product.id, 20)
+      assert item.on_hand == 23
+
+      # …and the parked order goes back through the front door.
+      assert {:ok, %{status: "received"}} = Workflow.retry_allocation(order.id)
+      assert {:ok, allocated} = Workflow.allocate_order(order.id)
+      assert allocated.status == "allocated"
+      assert fresh_stock(facility, product).allocated == 8
+    end
+
+    test "only parked exceptions can retry" do
+      product = product_fixture()
+      {:ok, order, :created} = Workflow.create_order(order_attrs(product, 1))
+
+      assert {:error, {:invalid_transition, "received", "received"}} =
+               Workflow.retry_allocation(order.id)
+    end
+  end
+
   describe "cancel_order/1" do
     test "cancelling an allocated order returns its stock" do
       product = product_fixture()

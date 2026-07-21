@@ -135,6 +135,84 @@ defmodule RelayWeb.API.OrderControllerTest do
     end
   end
 
+  describe "GET /api/v1/orders?number=" do
+    test "substring-matches order numbers for the topbar search", %{conn: conn} do
+      product = product_fixture()
+      {:ok, order, :created} = Relay.Orders.Workflow.create_order(order_attrs(product, 1))
+
+      fragment = String.slice(order.number, 4, 4)
+      conn = get(conn, ~p"/api/v1/orders?number=#{fragment}")
+
+      assert %{"data" => data} = json_response(conn, 200)
+      assert Enum.any?(data, &(&1["number"] == order.number))
+    end
+  end
+
+  describe "POST /api/v1/orders/:id/retry" do
+    test "sends an exception order back through allocation", %{conn: conn} do
+      product = product_fixture()
+      facility = facility_fixture()
+      stock_fixture(facility, product, 2)
+
+      {:ok, order, :created} = Relay.Orders.Workflow.create_order(order_attrs(product, 9))
+      {:ok, _} = Relay.Orders.Workflow.allocate_order(order.id)
+
+      conn = post(conn, ~p"/api/v1/orders/#{order.id}/retry")
+      assert %{"data" => %{"status" => "received"}} = json_response(conn, 200)
+    end
+
+    test "409s retrying an order that is not parked", %{conn: conn} do
+      product = product_fixture()
+      {:ok, order, :created} = Relay.Orders.Workflow.create_order(order_attrs(product, 1))
+
+      conn = post(conn, ~p"/api/v1/orders/#{order.id}/retry")
+      assert %{"error" => %{"code" => "invalid_transition"}} = json_response(conn, 409)
+    end
+  end
+
+  describe "POST /api/v1/inventory/receive" do
+    test "increases on_hand at the facility", %{conn: conn} do
+      product = product_fixture()
+      facility = facility_fixture()
+      stock_fixture(facility, product, 5)
+
+      conn =
+        post(conn, ~p"/api/v1/inventory/receive", %{
+          "facility_id" => facility.id,
+          "product_id" => product.id,
+          "quantity" => 12
+        })
+
+      assert %{"data" => %{"on_hand" => 17, "available" => 17}} = json_response(conn, 200)
+    end
+
+    test "404s an unknown facility/product pair", %{conn: conn} do
+      conn =
+        post(conn, ~p"/api/v1/inventory/receive", %{
+          "facility_id" => Ecto.UUID.generate(),
+          "product_id" => Ecto.UUID.generate(),
+          "quantity" => 5
+        })
+
+      assert %{"error" => %{"code" => "not_found"}} = json_response(conn, 404)
+    end
+
+    test "422s a non-positive quantity", %{conn: conn} do
+      product = product_fixture()
+      facility = facility_fixture()
+      stock_fixture(facility, product, 5)
+
+      conn =
+        post(conn, ~p"/api/v1/inventory/receive", %{
+          "facility_id" => facility.id,
+          "product_id" => product.id,
+          "quantity" => 0
+        })
+
+      assert %{"error" => %{"code" => "invalid_quantity"}} = json_response(conn, 422)
+    end
+  end
+
   describe "ops endpoints" do
     test "health reports ok", %{conn: conn} do
       assert %{"status" => "ok"} = conn |> get(~p"/api/v1/health") |> json_response(200)
