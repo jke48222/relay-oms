@@ -28,3 +28,30 @@ export function duration(seconds: number | null): string {
 export function eventLabel(type: string): string {
   return type.replace(/^order\./, '').replaceAll('_', ' ')
 }
+
+/** Chip class for an event type: "order.allocation_failed" → exception red. */
+export function eventChipClass(type: string): string {
+  const suffix = type.replace(/^order\./, '')
+  if (suffix === 'allocation_failed') return 'st-exception'
+  return `st-${suffix}`
+}
+
+interface Sequenced {
+  sequence: number
+}
+
+/**
+ * Merge the live socket feed with the fetched backlog: dedupe by sequence
+ * (live wins), newest first, capped. Pure so it's unit-testable.
+ */
+export function mergeFeed<T extends Sequenced>(live: T[], fetched: T[], cap = 60): T[] {
+  const seen = new Set<number>()
+  const merged: T[] = []
+  for (const item of [...live, ...fetched]) {
+    if (!seen.has(item.sequence)) {
+      seen.add(item.sequence)
+      merged.push(item)
+    }
+  }
+  return merged.sort((a, b) => b.sequence - a.sequence).slice(0, cap)
+}

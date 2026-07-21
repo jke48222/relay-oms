@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { StatusChip, eventChipClass } from './StatusChip'
+import { StatusChip } from './StatusChip'
+import { eventChipClass } from '../format'
 
 describe('StatusChip', () => {
   it('renders the status with its color class', () => {

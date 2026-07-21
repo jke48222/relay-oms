@@ -42,31 +42,50 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
+export interface OrderListParams {
+  status?: string
+  channel?: string
+  number?: string
+  page?: number
+  page_size?: number
+}
+
+// GET helpers accept the React Query AbortSignal so superseded refetches
+// cancel their in-flight requests instead of racing them.
 export const api = {
-  metrics: () => request<{ data: Metrics }>('/metrics').then((r) => r.data),
+  metrics: (signal?: AbortSignal) =>
+    request<{ data: Metrics }>('/metrics', { signal }).then((r) => r.data),
 
-  products: () => request<{ data: Product[] }>('/products').then((r) => r.data),
+  products: (signal?: AbortSignal) =>
+    request<{ data: Product[] }>('/products', { signal }).then((r) => r.data),
 
-  facilities: () =>
-    request<{ data: Facility[] }>('/facilities').then((r) => r.data),
+  facilities: (signal?: AbortSignal) =>
+    request<{ data: Facility[] }>('/facilities', { signal }).then((r) => r.data),
 
-  inventory: () =>
-    request<{ data: InventoryItem[]; snapshot: FacilitySnapshot[] }>('/inventory'),
+  inventory: (signal?: AbortSignal) =>
+    request<{ data: InventoryItem[]; snapshot: FacilitySnapshot[] }>('/inventory', {
+      signal,
+    }),
 
-  events: (limit = 40) =>
-    request<{ data: OrderEvent[] }>(`/events?limit=${limit}`).then((r) => r.data),
+  events: (limit = 40, signal?: AbortSignal) =>
+    request<{ data: OrderEvent[] }>(`/events?limit=${limit}`, { signal }).then(
+      (r) => r.data,
+    ),
 
-  orders: (params: { status?: string; channel?: string; page?: number; page_size?: number }) => {
+  orders: (params: OrderListParams, signal?: AbortSignal) => {
     const qs = new URLSearchParams()
     if (params.status) qs.set('status', params.status)
     if (params.channel) qs.set('channel', params.channel)
+    if (params.number) qs.set('number', params.number)
     if (params.page) qs.set('page', String(params.page))
     if (params.page_size) qs.set('page_size', String(params.page_size))
-    return request<Page<Order>>(`/orders?${qs}`)
+    return request<Page<Order>>(`/orders?${qs}`, { signal })
   },
 
-  order: (id: string) =>
-    request<{ data: OrderWithEvents }>(`/orders/${id}`).then((r) => r.data),
+  order: (id: string, signal?: AbortSignal) =>
+    request<{ data: OrderWithEvents }>(`/orders/${id}`, { signal }).then(
+      (r) => r.data,
+    ),
 
   createOrder: (input: {
     channel: string
@@ -88,6 +107,17 @@ export const api = {
     request<{ data: Order }>(`/orders/${id}/cancel`, { method: 'POST' }).then(
       (r) => r.data,
     ),
+
+  retryOrder: (id: string) =>
+    request<{ data: Order }>(`/orders/${id}/retry`, { method: 'POST' }).then(
+      (r) => r.data,
+    ),
+
+  receiveStock: (input: { facility_id: string; product_id: string; quantity: number }) =>
+    request<{ data: InventoryItem }>('/inventory/receive', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }).then((r) => r.data),
 
   simulate: (count: number) =>
     request<{ data: { created: string[]; count: number } }>('/simulate', {
